@@ -199,15 +199,15 @@ test_get_proxies_direct (Fixture    *self,
 {
   g_auto (GStrv) config = NULL;
 
-  config = px_manager_get_proxies_sync (self->manager, "", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "direct://");
 
-  config = px_manager_get_proxies_sync (self->manager, "nonsense", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "nonsense");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "direct://");
 
-  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "direct://");
 }
@@ -218,7 +218,7 @@ test_get_proxies_nonpac (Fixture    *self,
 {
   g_auto (GStrv) config = NULL;
 
-  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "http://127.0.0.1:1983");
 }
@@ -229,27 +229,50 @@ get_proxies_pac (gpointer data)
   Fixture *self = data;
   g_auto (GStrv) config = NULL;
 
-  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com", NULL);
-  g_assert_nonnull (config);
-  g_assert_cmpstr (config[0], ==, "http://127.0.0.1:1983");
+  g_setenv("PX_DEBUG_PACALERT", "1", TRUE);
 
-  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.4", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com");
+  g_assert_nonnull (config);
+  g_assert_cmpstr (config[0], ==, "http://127.0.0.1:1984");
+
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.4");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "socks://127.0.0.1:1983");
 
-  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.5", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.5");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "socks4://127.0.0.1:1983");
 
-  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.6", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.6");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "socks4a://127.0.0.1:1983");
 
-  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.7", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.7");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "socks5://127.0.0.1:1983");
 
+  /* Fallback */
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.11.8");
+  g_assert_nonnull (config);
+  g_assert_cmpstr (config[0], ==, "direct://");
+
+  /* Invalid return URI */
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.8");
+  g_assert_nonnull (config);
+  g_assert_cmpstr (config[0], ==, "direct://");
+
+  /* Invalid return URI */
+  config = px_manager_get_proxies_sync (self->manager, "https://192.168.10.9");
+  g_assert_nonnull (config);
+  g_assert_cmpstr (config[0], ==, "direct://");
+
+  /* Invalid input url */
+  config = px_manager_get_proxies_sync (self->manager, "invalid");
+  g_assert_nonnull (config);
+  g_assert_cmpstr (config[0], ==, "direct://");
+
   g_main_loop_quit (self->loop);
+  g_unsetenv("PX_DEBUG_PACALERT");
 
   return NULL;
 }
@@ -264,13 +287,25 @@ test_get_proxies_pac (Fixture    *self,
   g_main_loop_run (self->loop);
 }
 
+static void
+test_get_proxies_pac_debug (Fixture    *self,
+                            const void *user_data)
+{
+  g_autoptr (GThread) thread = NULL;
+
+  g_setenv("PX_DEBUG", "1", TRUE);
+  thread = g_thread_new ("test", (GThreadFunc)get_proxies_pac, self);
+  g_main_loop_run (self->loop);
+  g_unsetenv ("PX_DEBUG");
+}
+
 static gpointer
 get_wpad (gpointer data)
 {
   Fixture *self = data;
   g_auto (GStrv) config = NULL;
 
-  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com", NULL);
+  config = px_manager_get_proxies_sync (self->manager, "https://www.example.com");
   g_assert_nonnull (config);
   g_assert_cmpstr (config[0], ==, "direct://");
 
@@ -293,7 +328,7 @@ static void
 test_ignore_domain (Fixture    *self,
                     const void *user_data)
 {
-  g_autoptr (GUri) uri = g_uri_parse("http://10.10.1.12", G_URI_FLAGS_PARSE_RELAXED, NULL);
+  g_autoptr (GUri) uri = g_uri_parse("http://10.10.1.12", G_URI_FLAGS_NONE, NULL);
   char **ignore_list = g_malloc0 (sizeof (char *) * 2);
   gboolean ret;
 
@@ -319,7 +354,7 @@ static void
 test_ignore_domain_port (Fixture    *self,
                          const void *user_data)
 {
-  g_autoptr (GUri) uri = g_uri_parse("http://10.10.1.12:22", G_URI_FLAGS_PARSE_RELAXED, NULL);
+  g_autoptr (GUri) uri = g_uri_parse("http://10.10.1.12:22", G_URI_FLAGS_NONE, NULL);
   char **ignore_list = g_malloc0 (sizeof (char *) * 2);
   gboolean ret;
 
@@ -354,7 +389,7 @@ static void
 test_ignore_hostname (Fixture    *self,
                       const void *user_data)
 {
-  g_autoptr (GUri) uri = g_uri_parse("http://18.10.1.12", G_URI_FLAGS_PARSE_RELAXED, NULL);
+  g_autoptr (GUri) uri = g_uri_parse("http://18.10.1.12", G_URI_FLAGS_NONE, NULL);
   char **ignore_list = g_malloc0 (sizeof (char *) * 2);
   gboolean ret;
 
@@ -367,7 +402,7 @@ test_ignore_hostname (Fixture    *self,
   g_uri_unref (uri);
 
   /* Valid test */
-  uri = g_uri_parse("http://127.0.0.1", G_URI_FLAGS_PARSE_RELAXED, NULL);
+  uri = g_uri_parse("http://127.0.0.1", G_URI_FLAGS_NONE, NULL);
   ret = px_manager_is_ignore (uri, ignore_list);
   g_assert_false (ret);
 
@@ -397,6 +432,7 @@ main (int    argc,
   g_test_add ("/pac/get_proxies_nonpac", Fixture, "px-manager-nonpac", fixture_setup, test_get_proxies_nonpac, fixture_teardown);
   g_test_add ("/pac/get_proxies_pac", Fixture, "px-manager-pac", fixture_setup, test_get_proxies_pac, fixture_teardown);
   g_test_add ("/pac/wpad", Fixture, "px-manager-wpad", fixture_setup, test_get_wpad, fixture_teardown);
+  g_test_add ("/pac/get_proxies_pac_debug", Fixture, "px-manager-pac", fixture_setup, test_get_proxies_pac_debug, fixture_teardown);
 
   g_test_add ("/ignore/domain", Fixture, "px-manager-ignore", fixture_setup, test_ignore_domain, fixture_teardown);
   g_test_add ("/ignore/domain_port", Fixture, "px-manager-ignore", fixture_setup, test_ignore_domain_port, fixture_teardown);

@@ -101,8 +101,6 @@ struct _PxManager {
 
 G_DEFINE_TYPE (PxManager, px_manager, G_TYPE_OBJECT)
 
-G_DEFINE_QUARK (px - manager - error - quark, px_manager_error)
-
 static void
 px_manager_on_network_changed (GNetworkMonitor *monitor,
                                gboolean         network_available,
@@ -440,16 +438,14 @@ px_manager_pac_download (PxManager  *self,
  * px_manager_get_configuration:
  * @self: a px manager
  * @uri: PAC uri
- * @error: a #GError
  *
  * Get raw proxy configuration for gien @uri.
  *
  * Returns: (transfer full) (nullable): a newly created `GStrv` containing configuration data for @uri.
  */
 char **
-px_manager_get_configuration (PxManager  *self,
-                              GUri       *uri,
-                              GError    **error)
+px_manager_get_configuration (PxManager *self,
+                              GUri      *uri)
 {
   g_autoptr (GStrvBuilder) builder = g_strv_builder_new ();
 
@@ -481,20 +477,21 @@ px_manager_run_pac (PxPacRunner  *pacrunner,
   for (int idx = 0; idx < g_strv_length (proxies_split); idx++) {
     char *line = g_strstrip (proxies_split[idx]);
     g_auto (GStrv) word_split = g_strsplit (line, " ", -1);
-    g_autoptr (GUri) proxy_uri = NULL;
-    char *method;
-    char *server;
 
     /* Check for syntax "METHOD SERVER" */
     if (g_strv_length (word_split) == 2) {
+      g_autoptr (GUri) proxy_uri = NULL;
       g_autofree char *uri_string = NULL;
       g_autofree char *proxy_string = NULL;
+      g_autoptr (GUri) test_uri = NULL;
+      char *method;
+      char *server;
 
       method = word_split[0];
       server = word_split[1];
 
       uri_string = g_strconcat ("http://", server, NULL);
-      proxy_uri = g_uri_parse (uri_string, G_URI_FLAGS_PARSE_RELAXED, NULL);
+      proxy_uri = g_uri_parse (uri_string, G_URI_FLAGS_NONE, NULL);
       if (!proxy_uri)
         continue;
 
@@ -510,10 +507,12 @@ px_manager_run_pac (PxPacRunner  *pacrunner,
         proxy_string = g_strconcat ("socks://", server, NULL);
       }
 
-      px_strv_builder_add_proxy (builder, proxy_string);
-    } else {
-      /* Syntax not found, returning direct */
-      px_strv_builder_add_proxy (builder, "direct://");
+      if (proxy_string) {
+        test_uri = g_uri_parse (proxy_string, G_URI_FLAGS_NONE, NULL);
+
+        if (test_uri)
+          px_strv_builder_add_proxy (builder, proxy_string);
+      }
     }
   }
 }
@@ -535,7 +534,7 @@ px_manager_expand_wpad (PxManager *self,
     }
 
     if (!self->pac_data) {
-      GUri *wpad_url = g_uri_parse ("http://wpad/wpad.dat", G_URI_FLAGS_PARSE_RELAXED, NULL);
+      GUri *wpad_url = g_uri_parse ("http://wpad/wpad.dat", G_URI_FLAGS_NONE, NULL);
 
       g_debug ("%s: Trying to find the PAC using WPAD...", __FUNCTION__);
       self->pac_url = g_uri_to_string (wpad_url);
@@ -621,18 +620,18 @@ px_manager_expand_pac (PxManager *self,
  * Returns: (transfer full) (nullable): a newly created `GStrv` containing proxy related information.
  */
 char **
-px_manager_get_proxies_sync (PxManager   *self,
-                             const char  *url,
-                             GError     **error)
+px_manager_get_proxies_sync (PxManager  *self,
+                             const char *url)
 {
   g_autoptr (GStrvBuilder) builder = NULL;
   g_autoptr (GUri) uri = NULL;
   g_auto (GStrv) config = NULL;
+  g_autoptr (GError) error = NULL;
 
   g_mutex_lock (&self->mutex);
 
   builder = g_strv_builder_new ();
-  uri = g_uri_parse (url, G_URI_FLAGS_PARSE_RELAXED, error);
+  uri = g_uri_parse (url, G_URI_FLAGS_NONE, &error);
 
   g_debug ("%s: url=%s online=%d", __FUNCTION__, url ? url : "?", self->online);
   if (!uri || !self->online) {
@@ -641,10 +640,10 @@ px_manager_get_proxies_sync (PxManager   *self,
     return g_strv_builder_end (builder);
   }
 
-  config = px_manager_get_configuration (self, uri, error);
+  config = px_manager_get_configuration (self, uri);
 
   for (int idx = 0; idx < g_strv_length (config); idx++) {
-    GUri *conf_url = g_uri_parse (config[idx], G_URI_FLAGS_PARSE_RELAXED, NULL);
+    GUri *conf_url = g_uri_parse (config[idx], G_URI_FLAGS_NONE, NULL);
 
     g_debug ("%s: Config[%d] = %s", __FUNCTION__, idx, config[idx]);
 
